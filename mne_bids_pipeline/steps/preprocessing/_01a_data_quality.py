@@ -120,7 +120,13 @@ def assess_data_quality(
         # If break annotation was used, visualize breaks
         if cfg.find_breaks:
             from mne_bids_pipeline._viz import visualize_bad_breaks
-            break_fig = visualize_bad_breaks(raw, cfg.break_start_regex, cfg.break_end_regex, cfg.modify_break_regex_func)
+
+            break_fig = visualize_bad_breaks(
+                raw,
+                cfg.break_start_regex,
+                cfg.break_end_regex,
+                cfg.modify_break_regex_func,
+            )
 
             msg = "Adding break annotation visualization to the report."
             logger.info(**gen_log_kwargs(message=msg))
@@ -136,15 +142,12 @@ def assess_data_quality(
                 report.add_figure(
                     fig=break_fig,
                     title="Visualization of break annotations",
-                    #section="ICA: nan removal",
+                    # section="ICA: nan removal",
                     caption=caption,
                     tags=("breaks"),
                     replace=True,
                 )
                 plt.close(break_fig)
-
-
-
 
     preexisting_bads = sorted(raw.info["bads"])
 
@@ -475,7 +478,9 @@ def _find_bads_pyprep(
 ) -> dict[str, list[str]]:
     msg = "Finding noisy channels with PyPREP."
     logger.info(**gen_log_kwargs(message=msg))
-    noisy_chans = NoisyChannels(raw, reject_by_annotation=cfg.pyprep_reject_by_annotation)
+    noisy_chans = NoisyChannels(
+        raw, reject_by_annotation=cfg.pyprep_reject_by_annotation
+    )
     if cfg.pyprep_reject_by_annotation == "omit":
         msg = "Excluding data segments with bad-annotations e.g. BAD_break for bad channel detection."
     else:
@@ -549,7 +554,7 @@ def get_config(
         pyprep_by_nan_flat_params=config.pyprep_by_nan_flat_params,
         pyprep_by_ransac=config.pyprep_by_ransac,
         pyprep_by_ransac_params=config.pyprep_by_ransac_params,
-        pyprep_reject_by_annotation = config.pyprep_reject_by_annotation,
+        pyprep_reject_by_annotation=config.pyprep_reject_by_annotation,
         # find_bad_channels_extra_kws=config.find_bad_channels_extra_kws,
         # automatic add_bads detection; this is the only step that does it
         find_flat_channels_meg=config.find_flat_channels_meg,

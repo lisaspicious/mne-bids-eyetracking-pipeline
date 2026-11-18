@@ -6,8 +6,8 @@ from typing import Annotated, Any, Literal
 import pandas as pd
 from annotated_types import Ge, Interval, Len, MinLen
 from mne import Covariance
-from mne_bids import BIDSPath
 from mne.io.base import BaseRaw
+from mne_bids import BIDSPath
 
 from mne_bids_pipeline.typing import (
     BaselineTypeT,

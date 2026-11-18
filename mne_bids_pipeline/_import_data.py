@@ -1,3 +1,4 @@
+import re
 import warnings
 from collections.abc import Iterable
 from types import SimpleNamespace
@@ -6,7 +7,6 @@ from typing import Any, Literal
 import mne
 import numpy as np
 import pandas as pd
-import re
 from mne_bids import BIDSPath, get_bids_path_from_fname, read_raw_bids
 
 from ._config_utils import (
@@ -21,6 +21,7 @@ from ._io import _read_json
 from ._logging import gen_log_kwargs, logger
 from ._run import _update_for_splits
 from .typing import ConditionsTypeT, InFilesT, IntArrayT, RunKindT, RunTypeT
+
 
 def make_epochs(
     *,
@@ -590,9 +591,13 @@ def _find_breaks_func(
         return
 
     if cfg.break_start_regex and cfg.break_end_regex:
-        _find_breaks_func_by_markers(cfg=cfg, raw=raw, subject=subject, session=session, run=run)
+        _find_breaks_func_by_markers(
+            cfg=cfg, raw=raw, subject=subject, session=session, run=run
+        )
     else:
-        _find_breaks_func_by_gaps(cfg=cfg, raw=raw, subject=subject, session=session, run=run)
+        _find_breaks_func_by_gaps(
+            cfg=cfg, raw=raw, subject=subject, session=session, run=run
+        )
 
 
 def _find_breaks_func_by_gaps(
@@ -611,9 +616,13 @@ def _find_breaks_func_by_gaps(
             f"while ignoring triggers except for those that match the regex {cfg.task_event_regex}."
         )
         try:
-            events, _  = mne.events_from_annotations(raw, regexp=cfg.task_event_regex)
+            events, _ = mne.events_from_annotations(raw, regexp=cfg.task_event_regex)
         except ValueError:
-            logger.warning(**gen_log_kwargs(message=f"No annotations matched the provided task_event_regex ({cfg.task_event_regex}). "))
+            logger.warning(
+                **gen_log_kwargs(
+                    message=f"No annotations matched the provided task_event_regex ({cfg.task_event_regex}). "
+                )
+            )
             return
     else:
         msg = f"Finding breaks with a minimum duration of {cfg.min_break_duration} seconds."
@@ -621,10 +630,10 @@ def _find_breaks_func_by_gaps(
 
     break_annots = mne.preprocessing.annotate_break(
         raw=raw,
-        events=events, 
+        events=events,
         min_break_duration=cfg.min_break_duration,
         t_start_after_previous=cfg.t_break_annot_start_after_previous_event,
-        t_stop_before_next=cfg.t_break_annot_stop_before_next_event
+        t_stop_before_next=cfg.t_break_annot_stop_before_next_event,
     )
 
     msg = (
@@ -649,7 +658,9 @@ def _find_breaks_func_by_markers(
     logger.info(**gen_log_kwargs(message=msg))
 
     if cfg.modify_break_regex_func:
-        break_start_regex, break_end_regex = cfg.modify_break_regex_func(raw, cfg.break_start_regex, cfg.break_end_regex)
+        break_start_regex, break_end_regex = cfg.modify_break_regex_func(
+            raw, cfg.break_start_regex, cfg.break_end_regex
+        )
         msg = f"The regular expressions have been modified as following: \n Break_start_regex: {break_start_regex} \n Break_end_regex: {break_end_regex}"
         logger.info(**gen_log_kwargs(message=msg))
     else:
@@ -666,21 +677,34 @@ def _find_breaks_func_by_markers(
 
     # If there are no complete break periods, log a message and return early
     if not starts or not ends:
-        logger.info(**gen_log_kwargs(
-            message=f"No complete break periods found(starts: {len(starts)}, ends: {len(ends)}); nothing to annotate."))
+        logger.info(
+            **gen_log_kwargs(
+                message=f"No complete break periods found(starts: {len(starts)}, ends: {len(ends)}); nothing to annotate."
+            )
+        )
         return
 
     # Check for consecutive starts or ends and log warnings if found
     markers = sorted([(o, "start") for o in starts] + [(o, "end") for o in ends])
     for (onset_prev, kind_prev), (onset_cur, kind_cur) in zip(markers, markers[1:]):
         if kind_prev == "start" and kind_cur == "start":
-            logger.warning(**gen_log_kwargs(message=(
-                f"Found two break starts in a row (~{onset_prev:.2f}s and ~{onset_cur:.2f}s); "
-                f"Not annotated until the next break start at {onset_cur:.2f}s. Manual inspection recommended.")))
+            logger.warning(
+                **gen_log_kwargs(
+                    message=(
+                        f"Found two break starts in a row (~{onset_prev:.2f}s and ~{onset_cur:.2f}s); "
+                        f"Not annotated until the next break start at {onset_cur:.2f}s. Manual inspection recommended."
+                    )
+                )
+            )
         elif kind_prev == "end" and kind_cur == "end":
-            logger.warning(**gen_log_kwargs(message=(
-                f"Found two break ends in a row (~{onset_prev:.2f}s and ~{onset_cur:.2f}s); "
-                f"a break start may be missing, so that break was not annotated. Manual inspection recommended.")))
+            logger.warning(
+                **gen_log_kwargs(
+                    message=(
+                        f"Found two break ends in a row (~{onset_prev:.2f}s and ~{onset_cur:.2f}s); "
+                        f"a break start may be missing, so that break was not annotated. Manual inspection recommended."
+                    )
+                )
+            )
 
     # pair up starts and ends to create break annotations
     onsets, durations, annotations = [], [], []
@@ -696,7 +720,9 @@ def _find_breaks_func_by_markers(
             onsets.append(rec_start)
             durations.append(ends[0] - rec_start)
             annotations.append("BAD_beginning")
-        if next_start is not None and (end is None or next_start < end):  # if the next start comes before the end, we have an unmatched start
+        if next_start is not None and (
+            end is None or next_start < end
+        ):  # if the next start comes before the end, we have an unmatched start
             continue  # skip this start, as it is unmatched
         elif end is not None:
             onsets.append(start)
@@ -705,9 +731,14 @@ def _find_breaks_func_by_markers(
         else:
             onsets.append(start)
             durations.append(rec_end - start)
-            annotations.append("BAD_ending")            
+            annotations.append("BAD_ending")
 
-    break_annots = mne.Annotations(onset=onsets, duration=durations, description=annotations, orig_time=raw.annotations.orig_time)
+    break_annots = mne.Annotations(
+        onset=onsets,
+        duration=durations,
+        description=annotations,
+        orig_time=raw.annotations.orig_time,
+    )
 
     msg = (
         f"Found and annotated "
@@ -715,7 +746,7 @@ def _find_breaks_func_by_markers(
     )
     logger.info(**gen_log_kwargs(message=msg))
 
-    raw.set_annotations(raw.annotations + break_annots) 
+    raw.set_annotations(raw.annotations + break_annots)
 
 
 def _get_bids_path_in(
