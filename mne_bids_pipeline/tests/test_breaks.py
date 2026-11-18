@@ -3,6 +3,22 @@ import mne
 import pytest
 from types import SimpleNamespace
 from mne_bids_pipeline._import_data import _find_breaks_func
+import re
+
+def _add_start_and_stop_experiment(
+        raw,
+        break_start_regex,
+        break_end_regex
+) -> tuple:
+    experiment_events_regex = r".*-trigger=0.*"
+    experiment_annotations = [ann for ann in raw.annotations if re.search(experiment_events_regex, ann["description"])]
+    first_exp_event = re.escape(experiment_annotations[0]["description"])
+    last_exp_event = re.escape(experiment_annotations[-1]["description"])
+
+    break_start_regex_new = break_start_regex + "|" + last_exp_event
+    break_end_regex_new = break_end_regex + "|" + first_exp_event
+
+    return break_start_regex_new, break_end_regex_new
 
 def make_raw(annots, duration=300.0, sfreq=100.0):
     info = mne.create_info(1, sfreq, "eeg")
@@ -26,8 +42,9 @@ def test_break_removal(capsys):
         task_event_regex=None,
         break_start_regex=None,
         break_end_regex=None,
+        modify_break_regex_func = None
     )
-    run = dict(subject="01", session=None, run=None)
+    run = dict(subject="01", session="001", run="001")
     duration = 300.0
     sfreq = 100.0
 
@@ -52,8 +69,8 @@ def test_break_removal(capsys):
 
     # SCENARIO 1.b: break removal by marker with non-matching start and end markers (two block_end (breal_start) in a row)
     annots = mne.Annotations(
-    [10, 100, 170, 190, 260], [0] * 5,
-    ["block_start", "block_end", "block_end", "block_start", "block_end"])
+        onset = [10, 100, 170, 190, 260], duration = [0] * 5,
+        description = ["block_start", "block_end", "block_end", "block_start", "block_end"])
     raw = make_raw(annots, duration=duration, sfreq=sfreq)
     _find_breaks_func(cfg=cfg, raw=raw, **run)
     breaks = get_results(raw)
@@ -67,8 +84,8 @@ def test_break_removal(capsys):
 
     # SCENARIO 1.c: break removal by marker with non-matching start and end markers (two block_start (breal_end) in a row)
     annots = mne.Annotations(
-    [10, 100, 170, 190, 260], [0] * 5,
-    ["block_start", "block_start", "block_end", "block_start", "block_end"])
+        onset = [10, 100, 170, 190, 260], duration = [0] * 5,
+        description = ["block_start", "block_start", "block_end", "block_start", "block_end"])
     raw = make_raw(annots, duration=duration, sfreq=sfreq)
     _find_breaks_func(cfg=cfg, raw=raw, **run)
     breaks = get_results(raw)
@@ -110,28 +127,48 @@ def test_break_removal(capsys):
 
     # SCENARIO 1.f: marker path, clean blocks, regex, no matches (no breaks should be found)
     raw= make_raw(mne.Annotations(
-    onset=[10, 80, 100, 170, 190, 260], duration=[0] * 6,
-    description=["event1", "event2", "event3", "event4", "event5", "event6"]))
+        onset=[10, 80, 100, 170, 190, 260], duration=[0] * 6,
+        description=["event1", "event2", "event3", "event4", "event5", "event6"]))
     _find_breaks_func(cfg=cfg, raw=raw, **run)
     breaks = get_results(raw)
     assert breaks == []
 
+    # SCENARIO 1.g: for dynamic modification of markers. no explicit marking for the start and end of the experiment.
+    raw =make_raw( mne.Annotations(
+        onset = [10, 80, 100, 170, 190, 260], duration = [0] * 6,
+        description = ["1-trigger=01", "block_end", "block_start", "block_end", "block_start", "1-trigger=010"]))
+    
+    cfg = SimpleNamespace(**{
+        **base,
+        "break_start_regex": r"block\d*_end",
+        "break_end_regex": r"block\d*_start",
+        "modify_break_regex_func": _add_start_and_stop_experiment,
+    })    
+    _find_breaks_func(cfg=cfg, raw=raw, **run)
+    breaks = get_results(raw)
+    assert breaks == [
+        ("BAD_beginning", 0.0, 10.0),
+        ("BAD_break", 80.0, 100.0),
+        ("BAD_break", 170.0, 190.0),
+        ("BAD_ending", 260.0, duration - 1/sfreq),
+    ]
+
 
     """ Test break removal by gap detection. """
-    ann = mne.Annotations(list(np.arange(0, 300, 1.0)) + [10, 250],
+    annotes = mne.Annotations(list(np.arange(0, 300, 1.0)) + [10, 250],
                         [0] * 300 + [0, 0],
                         ["sync"] * 300 + ["event_1", "event_2"])
 
     # SCENARIO 2.a: 1 Hz pulses, no event regex defined (pulses hide the break)
     cfg = SimpleNamespace(**base)
-    raw = make_raw(ann)
+    raw = make_raw(annotes)
     _find_breaks_func(cfg=cfg, raw=raw, **run)
     breaks = get_results(raw)
     assert breaks == []
 
     # SCENARIO 2.b: 1 Hz pulses, event regex defined (break reappears)
     cfg = SimpleNamespace(**{**base, "task_event_regex": "event"})
-    raw = make_raw(ann)
+    raw = make_raw(annotes)
     _find_breaks_func(cfg=cfg, raw=raw, **run)
     breaks = get_results(raw)
     assert breaks == [
