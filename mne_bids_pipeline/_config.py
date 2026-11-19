@@ -6,6 +6,7 @@ from typing import Annotated, Any, Literal
 import pandas as pd
 from annotated_types import Ge, Interval, Len, MinLen
 from mne import Covariance
+from mne.io.base import BaseRaw
 from mne_bids import BIDSPath
 
 from mne_bids_pipeline.typing import (
@@ -603,6 +604,107 @@ pre-stimulus period as bad.
     t_break_annot_start_after_previous_event = 0.
     ```
 """
+
+break_start_regex: str | None = None
+"""
+Regular expression matching the annotation descriptions that mark the **start**
+of a break period (marker-based break detection). If both this and
+[`break_end_regex`][mne_bids_pipeline._config.break_end_regex] are set, breaks
+are detected by pairing these markers instead of by gap detection.
+
+For data with `block_start`/`block_end` markers, note that a break *starts*
+when a block *ends*, so this should match the block-end trigger.
+
+???+ example "Example"
+```python
+    break_start_regex = r"block\\d+_end"
+```
+"""
+
+break_end_regex: str | None = None
+"""
+Regular expression matching the annotation descriptions that mark the **end**
+of a break period (marker-based break detection). See
+[`break_start_regex`][mne_bids_pipeline._config.break_start_regex]. For
+`block_start`/`block_end` data this should match the block-start trigger, as a
+break *ends* when the next block *begins*.
+
+???+ example "Example"
+```python
+    break_end_regex = r"block\\d+_start"
+```
+"""
+
+modify_break_regex_func: Callable[[BaseRaw, str, str], tuple[str, str]] | None = None
+"""
+A custom function to dynamically modify [`break_start_regex`][mne_bids_pipeline._config.break_start_regex] and
+[`break_end_regex`][mne_bids_pipeline._config.break_end_regex] patterns based on any information extracted
+from the `Raw` object or its annotations.
+
+The function must accept the following arguments:
+
+- `raw`: The MNE `Raw` object.
+- `break_start_regex` (str): The current regex pattern for identifying the start of breaks.
+- `break_end_regex` (str): The current regex pattern for identifying the end of breaks.
+
+The function must return a tuple of two regular expressions:
+- The new `break_start_regex` pattern to use.
+- The new `break_end_regex` pattern to use.
+
+A use case could be that there are only break start and stop markers in the data but neither
+block start and stop markers nor start and stop experiment markers. In this case the beginning and ending
+of the recording cannot be automatically annotated as breaks.
+As a solution, start and stop of the experiment can be dynamically added to the regex depending on the first
+and last experimental event markers that have been sent.
+
+???+ example "Example"
+```python
+    # To avoid pickling issues (due to the use of the re package),
+    # define this function in an extra Python file e.g. custom_config_functions.py
+
+    from mne.io.base import BaseRaw
+    from typing import Tuple 
+    import re
+
+    def add_start_and_stop_experiment(
+            raw: BaseRaw,
+            break_start_regex:str,
+            break_end_regex:str
+    ) -> Tuple[str, str]:
+        experiment_events_regex = r".*-trigger=0.*"
+        experiment_annotations = [ann for ann in raw.annotations if re.search(experiment_events_regex, ann["description"])]
+        first_exp_event = re.escape(experiment_annotations[0]["description"])
+        last_exp_event = re.escape(experiment_annotations[-1]["description"])
+
+        break_start_regex_new = break_start_regex + "|" + last_exp_event
+        break_end_regex_new = break_end_regex + "|" + first_exp_event
+
+        return break_start_regex_new, break_end_regex_new
+
+    # In the config file the function is imported
+    import sys
+    sys.path.append("/folder/of/custom_config_functions.py")
+    from custom_config_functions import add_start_and_stop_experiment
+
+    modify_break_regex_func = add_start_and_stop_experiment
+```
+"""
+
+task_event_regex: str | None = None
+"""
+Regular expression selecting the task events to keep when detecting breaks by
+gaps. Only annotations whose description matches are considered "real" events;
+everything else (e.g. regular synchronization pulses that would otherwise fill
+every gap) is ignored, so breaks re-emerge as long event-free spans. Used only
+when [`break_start_regex`][mne_bids_pipeline._config.break_start_regex] and
+[`break_end_regex`][mne_bids_pipeline._config.break_end_regex] are not set.
+
+???+ example "Example"
+```python
+    task_event_regex = r"stimulus/.*"
+```
+"""
+
 
 # %%
 # ## Bad channel detection
@@ -1455,6 +1557,13 @@ Regular expression used for searching for calibration events
 
 # run bad channel detection
 pyprep_bad_chans: bool = False
+
+pyprep_reject_by_annotation: Literal["omit"] | None = "omit"
+"""
+Whether to include BAD data segments (annotations starting with "BAD" or "bad" e.g. "BAD_break") for the bad channel detection.
+When set to "omit" (Default), BAD data segments will be excluded. When set to "None" the annotations will be ignored.
+"""
+
 ## variables which determine which algos to run
 # run all available algos. if True
 pyprep_all_bads: bool = True
